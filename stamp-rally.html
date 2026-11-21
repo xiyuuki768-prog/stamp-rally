@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>全国スタンプ帖</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+<style>
+:root{--ink:#1c2a44;--paper:#f1f3ef;--seal:#c8352c;--line:#cfd5d0;--mut:#5d6878;--f:'Zen Kaku Gothic New','Hiragino Sans','Noto Sans JP',sans-serif}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;font:400 15px/1.5 var(--f);background:var(--paper);color:var(--ink)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+header{position:relative;z-index:2000;background:var(--ink);color:#fff;padding:10px 12px 10px;padding-top:max(10px,env(safe-area-inset-top))}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+h1{font-size:18px;margin:0;letter-spacing:.04em}
+#count{background:var(--seal);border-radius:99px;padding:1px 12px;font-size:13px;font-weight:700}
+.sw{position:relative}
+#sf{display:flex;gap:6px}
+#q{flex:1;min-width:0;font-size:16px;padding:9px 12px;border:0;border-radius:8px;color:var(--ink)}
+#sf button{border:0;border-radius:8px;background:#fff;color:var(--ink);font-weight:700;padding:0 14px}
+#res{position:absolute;left:0;right:0;top:100%;margin:6px 0 0;padding:4px;list-style:none;background:#fff;color:var(--ink);border-radius:10px;box-shadow:0 8px 24px #0004;max-height:50dvh;overflow:auto;z-index:2500}
+#res button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;border-radius:6px}
+#res button:hover{background:var(--paper)}
+#res small{display:block;color:var(--mut)}
+#res .m{padding:10px;color:var(--mut)}
+.flt{display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:6px;margin-top:8px}
+.flt select{min-width:0;font-size:14px;padding:6px;border:1px solid #ffffff55;border-radius:8px;background:#2b3d5e;color:#fff}
+.flt option{background:#fff;color:var(--ink)}
+main{flex:1;position:relative;min-height:0}
+#map{position:absolute;inset:0;z-index:0}
+#list{position:absolute;inset:0;overflow:auto;padding:12px}
+body[data-v=list] #map,body[data-v=map] #list{display:none}
+.it{display:flex;gap:12px;align-items:center;width:100%;text-align:left;padding:10px;background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:8px}
+.th{flex:none;width:56px;height:56px;border-radius:8px;object-fit:cover;background:var(--paper);display:grid;place-items:center;font-weight:700;font-size:20px;color:var(--mut)}
+.it .bd{flex:1;min-width:0}
+.it b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.it small{color:var(--mut)}
+.st{flex:none;font-size:12px;font-weight:700;padding:2px 10px;border-radius:99px;border:1px dashed var(--mut);color:var(--mut)}
+.st.on{border:1px solid var(--seal);background:var(--seal);color:#fff}
+.empty{text-align:center;color:var(--mut);padding:48px 16px}
+nav{display:grid;grid-template-columns:1fr 1fr;background:#fff;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{background:none;border:0;padding:12px;font-weight:700;color:var(--mut);border-top:3px solid transparent}
+nav button.on{color:var(--ink);border-top-color:var(--seal)}
+/* pins: 未訪問=白地+破線 / 獲得済み=朱色ベタ */
+.pin{width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 2px 6px #0006}
+.pin b{transform:rotate(45deg);font:700 14px/1 var(--f)}
+.pin.off{background:#fff;border:3px dashed var(--ink);color:var(--ink)}
+.pin.on{background:var(--seal);border:3px solid #fff;color:#fff}
+.pin.new{background:var(--ink);border:3px solid #fff;color:#fff}
+#sheet{position:fixed;z-index:3000;left:0;right:0;bottom:0;max-height:72dvh;overflow:auto;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -6px 28px #0004;padding:14px 16px calc(16px + env(safe-area-inset-bottom));transform:translateY(105%);visibility:hidden;transition:transform .25s,visibility .25s}
+#sheet.open{transform:none;visibility:visible}
+@media(min-width:800px){#sheet{left:auto;right:16px;bottom:16px;width:420px;max-height:calc(100dvh - 32px);border-radius:16px}}
+@media(prefers-reduced-motion:reduce){#sheet{transition:none}}
+.hd{display:flex;justify-content:space-between;align-items:center}
+.hd h2{margin:0;font-size:17px}
+.x{background:none;border:0;color:var(--mut);padding:6px}
+label{display:block;font-size:13px;color:var(--mut);margin-top:10px}
+label input,label select,label textarea{display:block;width:100%;margin-top:4px;font-size:16px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sub{font-size:12px;color:var(--mut);margin:6px 0 0}
+fieldset{margin:16px 0 0;padding:12px;border:1px solid var(--line);border-radius:12px}
+legend{padding:0 6px;font-weight:700}
+#pv{position:relative;aspect-ratio:4/3;border:2px dashed var(--line);border-radius:10px;background:var(--paper);overflow:hidden;display:grid;place-items:center;color:var(--mut);font-size:13px;text-align:center;padding:8px}
+#pv img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.seal{position:absolute;right:10px;bottom:10px;width:62px;height:62px;border:3px solid var(--seal);border-radius:50%;background:#ffffffd9;color:var(--seal);display:grid;place-items:center;font-weight:700;font-size:28px;transform:rotate(-12deg)}
+.btns{display:flex;gap:8px;margin-top:8px}
+.btn{flex:1;text-align:center;padding:9px;border:1px solid var(--ink);border-radius:8px;background:#fff;font-weight:700;margin:0;color:var(--ink);font-size:14px}
+.act{display:flex;gap:10px;margin-top:16px}
+.act button{padding:12px;border-radius:10px;font-weight:700;border:1px solid var(--line);background:#fff}
+.act .pri{flex:1;background:var(--seal);border-color:var(--seal);color:#fff}
+.act .del{color:var(--seal)}
+#toast{position:fixed;z-index:4000;left:50%;bottom:84px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 16px;border-radius:99px;font-size:14px;max-width:90%;text-align:center}
+</style>
+</head>
+<body data-v="map">
+<header>
+  <div class="top"><h1>全国スタンプ帖</h1><span id="count">0 / 0 獲得</span></div>
+  <div class="sw">
+    <form id="sf"><input id="q" type="search" placeholder="地名・スポット名で検索" autocomplete="off"><button>検索</button></form>
+    <ul id="res" hidden></ul>
+  </div>
+  <div class="flt"><select id="flr" aria-label="地域"></select><select id="flc" aria-label="種類"></select><select id="flt" aria-label="作品・タグ"></select></div>
+</header>
+<main>
+  <div id="map"></div>
+  <section id="list"></section>
+</main>
+<nav><button data-v="map" class="on">地図</button><button data-v="list">一覧</button></nav>
+
+<form id="sheet" aria-label="スポット詳細">
+  <div class="hd"><h2 id="stt"></h2><button type="button" class="x" id="cl">閉じる</button></div>
+  <label>名称<input id="nm" required maxlength="100"></label>
+  <p class="sub" id="coord"></p>
+  <div class="row">
+    <label>地域<select id="rg" required></select></label>
+    <label>種類<select id="ct" required></select></label>
+  </div>
+  <label>詳細タグ／作品名<input id="tg" list="tl" maxlength="60" placeholder="例：ゆるキャン△、秋の京都"></label>
+  <datalist id="tl"></datalist>
+  <fieldset>
+    <legend>スタンプ</legend>
+    <div id="pv"></div>
+    <div class="btns">
+      <label class="btn">写真を選ぶ<input id="ph" type="file" accept="image/*" hidden></label>
+      <button type="button" class="btn" id="rm">写真を外す</button>
+    </div>
+    <label>訪問日<input id="vd" type="date"></label>
+    <label>メモ<textarea id="mm" rows="3" maxlength="1000"></textarea></label>
+  </fieldset>
+  <div class="act"><button type="button" class="del" id="del">削除</button><button class="pri" id="sv">保存</button></div>
+</form>
+<div id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+
+/* ---------- マスタ ---------- */
+const REGIONS = ['北海道・東北','関東','中部','近畿','中国・四国','九州・沖縄'];
+const CATS = {'アニメ聖地':'聖','グルメ':'食','観光':'観','その他':'他'};
+const PREF = [
+  '北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県',
+  '茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県',
+  '新潟県 富山県 石川県 福井県 山梨県 長野県 岐阜県 静岡県 愛知県',
+  '三重県 滋賀県 京都府 大阪府 兵庫県 奈良県 和歌山県',
+  '鳥取県 島根県 岡山県 広島県 山口県 徳島県 香川県 愛媛県 高知県',
+  '福岡県 佐賀県 長崎県 熊本県 大分県 宮崎県 鹿児島県 沖縄県'];
+const regionOf = st => { const i = PREF.findIndex(g => g.split(' ').includes(st)); return i < 0 ? '' : REGIONS[i]; };
+
+/* ---------- データ層 ----------
+   画面側は Store の5メソッドしか使わない。
+   クラウドDB・PC同期を足すときは、同じ形のオブジェクト（Firestore/Supabase等）に差し替える。
+   spots: {id, name, lat, lng, region, category, tag, visited, visitDate, memo, createdAt, updatedAt}
+   photos: {spotId, blob, updatedAt}  ※写真は別ストアに分離（同期時に個別アップロードしやすい） */
+const Store = (() => {
+  let dbp;
+  const open = () => dbp ||= new Promise((ok, ng) => {
+    const r = indexedDB.open('stamp-rally', 1);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      d.createObjectStore('spots', {keyPath: 'id'});
+      d.createObjectStore('photos', {keyPath: 'spotId'});
+    };
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => ng(r.error);
+  });
+  const run = async (names, mode, fn) => {
+    const d = await open();
+    return new Promise((ok, ng) => {
+      const t = d.transaction(names, mode); let r;
+      try { r = fn(...names.map(n => t.objectStore(n))); } catch (e) { return ng(e); }
+      t.oncomplete = () => ok(r && r.result);
+      t.onerror = t.onabort = () => ng(t.error);
+    });
+  };
+  return {
+    spots:  () => run(['spots'], 'readonly', s => s.getAll()),
+    photos: () => run(['photos'], 'readonly', p => p.getAll()),
+    // photo: undefined=変更なし / Blob=差し替え / null=削除
+    save: (spot, photo) => run(['spots', 'photos'], 'readwrite', (s, p) => {
+      if (photo === null) p.delete(spot.id);
+      else if (photo) p.put({spotId: spot.id, blob: photo, updatedAt: spot.updatedAt});
+      return s.put(spot);
+    }),
+    remove: id => run(['spots', 'photos'], 'readwrite', (s, p) => { p.delete(id); return s.delete(id); })
+  };
+})();
+
+/* ---------- 状態 ---------- */
+let spots = [], photoURL = {}, F = {r: '', c: '', t: ''}, cur = null, tmp = null;
+
+/* ---------- 地図 ---------- */
+const map = L.map('map', {zoomControl: false}).setView([37.5, 137.5], 5);
+const gsi = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {maxZoom: 18, attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html">地理院タイル</a>'}).addTo(map);
+const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap contributors'});
+L.control.layers({'地理院地図': gsi, 'OpenStreetMap': osm}).addTo(map);
+L.control.zoom({position: 'bottomright'}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+const icon = (s, cls) => L.divIcon({className: '', html: `<div class="pin ${cls}"><b>${s ? CATS[s.category] || '他' : '＋'}</b></div>`, iconSize: [30, 30], iconAnchor: [15, 36]});
+
+map.on('click', e => { hideRes(); startNew({lat: e.latlng.lat, lng: e.latlng.lng}); });
+
+/* ---------- 絞り込み・描画 ---------- */
+const fillSel = (el, ph, arr) => el.innerHTML = `<option value="">${ph}</option>` + arr.map(v => `<option>${esc(v)}</option>`).join('');
+fillSel($('#flr'), '地域：すべて', REGIONS);
+fillSel($('#flc'), '種類：すべて', Object.keys(CATS));
+fillSel($('#rg'), '選択…', REGIONS);
+fillSel($('#ct'), '選択…', Object.keys(CATS));
+['flr', 'flc', 'flt'].forEach(id => $('#' + id).onchange = () => {
+  F = {r: $('#flr').value, c: $('#flc').value, t: $('#flt').value};
+  render(); fit();
+});
+
+const filtered = () => spots.filter(s => (!F.r || s.region === F.r) && (!F.c || s.category === F.c) && (!F.t || s.tag === F.t));
+
+function fit() {
+  const p = filtered().map(s => [s.lat, s.lng]);
+  if (p.length && document.body.dataset.v === 'map') map.fitBounds(p, {padding: [60, 60], maxZoom: 14});
+}
+
+function render() {
+  const tags = [...new Set(spots.map(s => s.tag).filter(Boolean))].sort();
+  if (F.t && !tags.includes(F.t)) F.t = '';
+  $('#flt').innerHTML = '<option value="">作品・タグ：すべて</option>' + tags.map(t => `<option ${t === F.t ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  $('#tl').innerHTML = tags.map(t => `<option value="${esc(t)}">`).join('');
+
+  const shown = filtered();
+  layer.clearLayers();
+  shown.forEach(s => L.marker([s.lat, s.lng], {icon: icon(s, s.visited ? 'on' : 'off'), title: s.name}).on('click', () => openSheet(s)).addTo(layer));
+  $('#count').textContent = `${shown.filter(s => s.visited).length} / ${shown.length} 獲得`;
+
+  $('#list').innerHTML = shown.length ? [...shown].sort((a, b) => b.createdAt - a.createdAt).map(s => `
+    <button class="it" data-id="${s.id}">
+      ${photoURL[s.id] ? `<img class="th" src="${photoURL[s.id]}" alt="">` : `<span class="th">${CATS[s.category] || '他'}</span>`}
+      <span class="bd"><b>${esc(s.name)}</b><small>${esc(s.region)}・${esc(s.category)}${s.tag ? '・' + esc(s.tag) : ''}${s.visited && s.visitDate ? '・' + esc(s.visitDate) : ''}</small></span>
+      <span class="st ${s.visited ? 'on' : ''}">${s.visited ? '獲得' : '未訪問'}</span>
+    </button>`).join('')
+    : `<p class="empty">${spots.length ? '条件に合うスポットがありません' : '地図をタップするか、検索して、最初のスポットを登録しましょう'}</p>`;
+}
+
+$('#list').onclick = e => {
+  const b = e.target.closest('.it'); if (!b) return;
+  const s = spots.find(x => x.id === b.dataset.id);
+  setView('map');
+  map.setView([s.lat, s.lng], 15);
+  openSheet(s);
+};
+
+function setView(v) {
+  document.body.dataset.v = v;
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  if (v === 'map') map.invalidateSize();
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => setView(b.dataset.v));
+
+/* ---------- 検索（Nominatim） ---------- */
+const hideRes = () => $('#res').hidden = true;
+$('#q').oninput = e => { if (!e.target.value) hideRes(); };
+$('#sf').onsubmit = async e => {
+  e.preventDefault();
+  const q = $('#q').value.trim(); if (!q) return;
+  const ul = $('#res'); ul.hidden = false; ul.innerHTML = '<li class="m">検索中…</li>';
+  try {
+    const r = await (await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&countrycodes=jp&limit=8&addressdetails=1&accept-language=ja`)).json();
+    if (!r.length) { ul.innerHTML = '<li class="m">見つかりませんでした。別の表記でお試しください</li>'; return; }
+    ul._r = r;
+    ul.innerHTML = r.map((x, i) => {
+      const p = x.display_name.split(', ');
+      return `<li><button type="button" data-i="${i}"><b>${esc(x.name || p[0])}</b><small>${esc(p.slice(1, 4).join(' '))}</small></button></li>`;
+    }).join('');
+  } catch { ul.innerHTML = '<li class="m">検索に失敗しました。通信状況を確認してください</li>'; }
+};
+$('#res').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const x = e.currentTarget._r[b.dataset.i], ll = [+x.lat, +x.lon];
+  hideRes(); setView('map'); map.flyTo(ll, 16);
+  startNew({lat: ll[0], lng: ll[1], name: x.name || x.display_name.split(', ')[0], region: regionOf(x.address?.state)});
+};
+
+/* ---------- 登録・詳細シート ---------- */
+function startNew(p) {
+  openSheet({id: uid(), name: p.name || '', lat: p.lat, lng: p.lng, region: p.region || '', category: '', tag: '', visited: false, visitDate: '', memo: ''}, true);
+  if (!p.name || !p.region) reverse(p);
+}
+
+async function reverse(p) {
+  const id = cur.spot.id;
+  try {
+    const r = await (await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${p.lat}&lon=${p.lng}&zoom=18&addressdetails=1&accept-language=ja`)).json();
+    if (!cur || cur.spot.id !== id) return;
+    const a = r.address || {};
+    if (!$('#nm').value && !$('#nm').dataset.d) $('#nm').value = r.name || a.road || a.neighbourhood || a.suburb || '';
+    const rg = regionOf(a.state || a.province);
+    if (rg && !$('#rg').value) $('#rg').value = rg;
+  } catch {}
+}
+
+function clearTmp() { if (tmp) { map.removeLayer(tmp); tmp = null; } }
+
+function openSheet(spot, isNew) {
+  clearTmp();
+  if (cur && cur.url) URL.revokeObjectURL(cur.url);
+  cur = {spot: {...spot}, isNew: !!isNew, photo: undefined, url: null};
+  if (isNew) {
+    tmp = L.marker([spot.lat, spot.lng], {icon: icon(null, 'new'), draggable: true}).addTo(map).on('dragend', e => {
+      const p = e.target.getLatLng(); cur.spot.lat = p.lat; cur.spot.lng = p.lng; showCoord();
+    });
+  }
+  $('#stt').textContent = isNew ? '新しいスポット' : 'スポットの詳細';
+  $('#nm').value = spot.name; delete $('#nm').dataset.d;
+  $('#rg').value = spot.region; $('#ct').value = spot.category; $('#tg').value = spot.tag;
+  $('#vd').value = spot.visitDate || ''; $('#mm').value = spot.memo || '';
+  $('#del').hidden = !!isNew;
+  showCoord(); showPhoto();
+  $('#sheet').classList.add('open');
+  if (innerWidth < 800) {   // ピンがシートに隠れないよう上へ寄せる
+    const h = $('#map').clientHeight, y = map.latLngToContainerPoint([spot.lat, spot.lng]).y;
+    if (y > h * .3) map.panBy([0, y - h * .15]);
+  }
+}
+
+function closeSheet() {
+  clearTmp();
+  if (cur && cur.url) URL.revokeObjectURL(cur.url);
+  cur = null;
+  $('#sheet').classList.remove('open');
+}
+
+const showCoord = () => $('#coord').textContent = `緯度 ${cur.spot.lat.toFixed(5)} / 経度 ${cur.spot.lng.toFixed(5)}` + (cur.isNew ? '（ピンはドラッグで微調整できます）' : '');
+
+function showPhoto() {
+  const src = cur.photo === null ? null : cur.photo ? cur.url : photoURL[cur.spot.id];
+  $('#pv').innerHTML = src ? `<img src="${src}" alt="訪問写真"><span class="seal">済</span>` : '写真を選ぶと<br>スタンプを獲得できます';
+  $('#rm').hidden = !src;
+  $('#sv').textContent = src ? 'スタンプを押して保存' : '保存';
+}
+
+async function shrink(file) {   // 長辺1600pxのJPEGに縮小して容量を節約
+  try {
+    const b = await createImageBitmap(file), k = Math.min(1, 1600 / Math.max(b.width, b.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(b.width * k); c.height = Math.round(b.height * k);
+    c.getContext('2d').drawImage(b, 0, 0, c.width, c.height);
+    return await new Promise(r => c.toBlob(r, 'image/jpeg', .85)) || file;
+  } catch { return file; }
+}
+
+$('#nm').oninput = e => e.target.dataset.d = 1;
+$('#cl').onclick = closeSheet;
+$('#rm').onclick = () => { cur.photo = null; showPhoto(); };
+$('#ph').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  cur.photo = await shrink(f);
+  if (cur.url) URL.revokeObjectURL(cur.url);
+  cur.url = URL.createObjectURL(cur.photo);
+  if (!$('#vd').value) $('#vd').value = today();
+  showPhoto();
+};
+
+$('#sheet').onsubmit = async e => {
+  e.preventDefault();
+  const s = cur.spot, now = Date.now(), had = !!photoURL[s.id];
+  Object.assign(s, {name: $('#nm').value.trim(), region: $('#rg').value, category: $('#ct').value, tag: $('#tg').value.trim(), visitDate: $('#vd').value, memo: $('#mm').value.trim(), updatedAt: now});
+  const has = cur.photo === null ? false : cur.photo ? true : had;
+  s.visited = has;
+  if (has && !s.visitDate) s.visitDate = today();
+  if (cur.isNew) s.createdAt = now;
+  try { await Store.save(s, cur.photo); } catch { return toast('保存に失敗しました'); }
+  if (cur.photo === null) { URL.revokeObjectURL(photoURL[s.id]); delete photoURL[s.id]; }
+  else if (cur.photo) { if (had) URL.revokeObjectURL(photoURL[s.id]); photoURL[s.id] = cur.url; cur.url = null; }
+  const i = spots.findIndex(x => x.id === s.id);
+  i < 0 ? spots.push(s) : spots[i] = s;
+  closeSheet(); render();
+  toast(has ? 'スタンプを獲得しました' : '保存しました');
+};
+
+$('#del').onclick = async () => {
+  if (!confirm('このスポットを削除しますか？（写真も削除されます）')) return;
+  const id = cur.spot.id;
+  try { await Store.remove(id); } catch { return toast('削除に失敗しました'); }
+  spots = spots.filter(s => s.id !== id);
+  if (photoURL[id]) { URL.revokeObjectURL(photoURL[id]); delete photoURL[id]; }
+  closeSheet(); render(); toast('削除しました');
+};
+
+let tt;
+function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 2600); }
+
+/* ---------- 起動 ---------- */
+(async () => {
+  try {
+    spots = await Store.spots();
+    for (const p of await Store.photos()) photoURL[p.spotId] = URL.createObjectURL(p.blob);
+  } catch { toast('保存領域を開けませんでした（プライベートブラウズでは動かない場合があります）'); }
+  render(); fit();
+})();
+</script>
+</body>
+</html>
