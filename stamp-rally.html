@@ -74,6 +74,22 @@ legend{padding:0 6px;font-weight:700}
 .act .pri{flex:1;background:var(--seal);border-color:var(--seal);color:#fff}
 .act .del{color:var(--seal)}
 #toast{position:fixed;z-index:4000;left:50%;bottom:84px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 16px;border-radius:99px;font-size:14px;max-width:90%;text-align:center}
+.lb{font-size:13px;color:var(--mut);margin-top:12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip{position:relative;margin:0}
+.chip input{position:absolute;opacity:0;width:0;height:0;margin:0;padding:0;border:0}
+.chip span{display:block;padding:6px 12px;border:1px solid var(--line);border-radius:99px;font-size:14px;color:var(--ink);background:#fff}
+.chip input:checked+span{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip input:focus-visible+span{outline:2px solid var(--seal);outline-offset:2px}
+.add{padding:6px 12px;border:1px dashed var(--mut);border-radius:99px;background:#fff;color:var(--mut);font-size:14px}
+.lt{margin-bottom:10px}
+.mk{width:100%;padding:10px;border:1px dashed var(--mut);border-radius:10px;background:#fff;font-weight:700;color:var(--ink)}
+.gp{margin-bottom:14px}
+.gh{display:flex;align-items:center;gap:4px;margin-bottom:6px}
+.tgl{flex:1;text-align:left;background:none;border:0;padding:6px 0;font-size:16px}
+.tgl small{color:var(--mut);margin-left:6px}
+.mn{background:none;border:0;color:var(--mut);font-size:13px;padding:6px}
+.hint{color:var(--mut);font-size:13px;margin:4px 0 8px}
 </style>
 </head>
 <body data-v="map">
@@ -97,10 +113,10 @@ legend{padding:0 6px;font-weight:700}
   <p class="sub" id="coord"></p>
   <div class="row">
     <label>地域<select id="rg" required></select></label>
-    <label>種類<select id="ct" required></select></label>
+    <label>フォルダ<select id="fd"></select></label>
   </div>
-  <label>詳細タグ／作品名<input id="tg" list="tl" maxlength="60" placeholder="例：ゆるキャン△、秋の京都"></label>
-  <datalist id="tl"></datalist>
+  <div class="lb">種類（複数選べます）</div><div class="chips" id="cts"></div>
+  <div class="lb">作品名・タグ（複数選べます）</div><div class="chips" id="tgs"></div>
   <fieldset>
     <legend>スタンプ</legend>
     <div id="pv"></div>
@@ -121,13 +137,17 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+const askName = (m, v = '') => (prompt(m, v) || '').trim().slice(0, 30);
 
 /* ---------- マスタ ---------- */
 const REGIONS = ['北海道・東北','関東','中部','近畿','中国・四国','九州・沖縄'];
 const CATS = {'アニメ聖地':'聖','グルメ':'食','観光':'観','その他':'他'};
 const glyph = c => CATS[c] || [...(c || '他')][0];
 // 種類 = 標準4種 + 登録済みスポットで使われている種類（自分で追加した分は保存すると残る）
-const cats = () => [...new Set([...Object.keys(CATS), ...spots.map(s => s.category).filter(Boolean)])];
+const cats = () => [...new Set([...Object.keys(CATS), ...spots.flatMap(s => s.categories)])];
+const tagList = () => [...new Set(spots.flatMap(s => s.tags))].sort();
+// 旧データ（category / tag が1つだけ）を複数対応の形に変換
+const norm = s => { s.categories = s.categories || (s.category ? [s.category] : []); s.tags = s.tags || (s.tag ? [s.tag] : []); s.folderId = s.folderId || ''; delete s.category; delete s.tag; return s; };
 const PREF = [
   '北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県',
   '茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県',
@@ -140,18 +160,19 @@ const regionOf = st => { const i = PREF.findIndex(g => g.split(' ').includes(st)
 /* ---------- データ層 ----------
    画面側は Store の5メソッドしか使わない。
    クラウドDB・PC同期を足すときは、同じ形のオブジェクト（Firestore/Supabase等）に差し替える。
-   spots: {id, name, lat, lng, region, category, tag, visited, visitDate, memo, createdAt, updatedAt}
+   spots: {id, name, lat, lng, region, categories[], tags[], folderId, visited, visitDate, memo, createdAt, updatedAt}
+   folders: {id, name, createdAt, updatedAt}
    photos: {spotId, blob, updatedAt}  ※写真は別ストアに分離（同期時に個別アップロードしやすい） */
 const Store = (() => {
   let dbp;
   const open = () => dbp ||= new Promise((ok, ng) => {
-    const r = indexedDB.open('stamp-rally', 1);
+    const r = indexedDB.open('stamp-rally', 2);
     r.onupgradeneeded = () => {
       const d = r.result;
-      d.createObjectStore('spots', {keyPath: 'id'});
-      d.createObjectStore('photos', {keyPath: 'spotId'});
+      [['spots', 'id'], ['photos', 'spotId'], ['folders', 'id']].forEach(([n, k]) => { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, {keyPath: k}); });
     };
-    r.onsuccess = () => ok(r.result);
+    r.onblocked = () => toast('他のタブでこのアプリを開いている場合は閉じて、再読み込みしてください');
+    r.onsuccess = () => { r.result.onversionchange = () => r.result.close(); ok(r.result); };
     r.onerror = () => ng(r.error);
   });
   const run = async (names, mode, fn) => {
@@ -166,6 +187,9 @@ const Store = (() => {
   return {
     spots:  () => run(['spots'], 'readonly', s => s.getAll()),
     photos: () => run(['photos'], 'readonly', p => p.getAll()),
+    folders: () => run(['folders'], 'readonly', f => f.getAll()),
+    saveFolder: f => run(['folders'], 'readwrite', s => s.put(f)),
+    removeFolder: id => run(['folders'], 'readwrite', s => s.delete(id)),
     // photo: undefined=変更なし / Blob=差し替え / null=削除
     save: (spot, photo) => run(['spots', 'photos'], 'readwrite', (s, p) => {
       if (photo === null) p.delete(spot.id);
@@ -177,7 +201,7 @@ const Store = (() => {
 })();
 
 /* ---------- 状態 ---------- */
-let spots = [], photoURL = {}, F = {r: '', c: '', t: ''}, cur = null, tmp = null;
+let spots = [], folders = [], collapsed = new Set(), photoURL = {}, F = {r: '', c: '', t: ''}, cur = null, tmp = null;
 
 /* ---------- 地図 ---------- */
 const map = L.map('map', {zoomControl: false}).setView([37.5, 137.5], 5);
@@ -186,7 +210,7 @@ const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZo
 L.control.layers({'地理院地図': gsi, 'OpenStreetMap': osm}).addTo(map);
 L.control.zoom({position: 'bottomright'}).addTo(map);
 const layer = L.layerGroup().addTo(map);
-const icon = (s, cls) => L.divIcon({className: '', html: `<div class="pin ${cls}"><b>${s ? glyph(s.category) : '＋'}</b></div>`, iconSize: [30, 30], iconAnchor: [15, 36]});
+const icon = (s, cls) => L.divIcon({className: '', html: `<div class="pin ${cls}"><b>${s ? glyph(s.categories[0]) : '＋'}</b></div>`, iconSize: [30, 30], iconAnchor: [15, 36]});
 
 map.on('click', e => { hideRes(); startNew({lat: e.latlng.lat, lng: e.latlng.lng}); });
 
@@ -199,7 +223,7 @@ fillSel($('#rg'), '選択…', REGIONS);
   render(); fit();
 });
 
-const filtered = () => spots.filter(s => (!F.r || s.region === F.r) && (!F.c || s.category === F.c) && (!F.t || s.tag === F.t));
+const filtered = () => spots.filter(s => (!F.r || s.region === F.r) && (!F.c || s.categories.includes(F.c)) && (!F.t || s.tags.includes(F.t)));
 
 function fit() {
   const p = filtered().map(s => [s.lat, s.lng]);
@@ -207,10 +231,9 @@ function fit() {
 }
 
 function render() {
-  const tags = [...new Set(spots.map(s => s.tag).filter(Boolean))].sort();
+  const tags = tagList();
   if (F.t && !tags.includes(F.t)) F.t = '';
   $('#flt').innerHTML = '<option value="">作品・タグ：すべて</option>' + tags.map(t => `<option ${t === F.t ? 'selected' : ''}>${esc(t)}</option>`).join('');
-  $('#tl').innerHTML = tags.map(t => `<option value="${esc(t)}">`).join('');
   const cl = cats();
   if (F.c && !cl.includes(F.c)) F.c = '';
   $('#flc').innerHTML = '<option value="">種類：すべて</option>' + cl.map(c => `<option ${c === F.c ? 'selected' : ''}>${esc(c)}</option>`).join('');
@@ -220,21 +243,44 @@ function render() {
   shown.forEach(s => L.marker([s.lat, s.lng], {icon: icon(s, s.visited ? 'on' : 'off'), title: s.name}).on('click', () => openSheet(s)).addTo(layer));
   $('#count').textContent = `${shown.filter(s => s.visited).length} / ${shown.length} 獲得`;
 
-  $('#list').innerHTML = shown.length ? [...shown].sort((a, b) => b.createdAt - a.createdAt).map(s => `
+  const item = s => `
     <button class="it" data-id="${s.id}">
-      ${photoURL[s.id] ? `<img class="th" src="${photoURL[s.id]}" alt="">` : `<span class="th">${glyph(s.category)}</span>`}
-      <span class="bd"><b>${esc(s.name)}</b><small>${esc(s.region)}・${esc(s.category)}${s.tag ? '・' + esc(s.tag) : ''}${s.visited && s.visitDate ? '・' + esc(s.visitDate) : ''}</small></span>
+      ${photoURL[s.id] ? `<img class="th" src="${photoURL[s.id]}" alt="">` : `<span class="th">${glyph(s.categories[0])}</span>`}
+      <span class="bd"><b>${esc(s.name)}</b><small>${esc([s.region, ...s.categories, ...s.tags].join('・'))}${s.visited && s.visitDate ? '・' + esc(s.visitDate) : ''}</small></span>
       <span class="st ${s.visited ? 'on' : ''}">${s.visited ? '獲得' : '未訪問'}</span>
-    </button>`).join('')
-    : `<p class="empty">${spots.length ? '条件に合うスポットがありません' : '地図をタップするか、検索して、最初のスポットを登録しましょう'}</p>`;
+    </button>`;
+  const sorted = [...shown].sort((a, b) => b.createdAt - a.createdAt);
+  const fk = f => f ? f.id : '_';
+  const grp = (f, items) => `<section class="gp"><div class="gh"><button class="tgl" data-t="${fk(f)}">${collapsed.has(fk(f)) ? '▸' : '▾'} <b>${f ? esc(f.name) : '未分類'}</b><small>${items.length}件</small></button>${f ? `<button class="mn" data-r="${f.id}">名前変更</button><button class="mn" data-d="${f.id}">削除</button>` : ''}</div>${collapsed.has(fk(f)) ? '' : items.map(item).join('') || '<p class="hint">空のフォルダです。スポット詳細の「フォルダ」で入れられます</p>'}</section>`;
+  const ids = new Set(folders.map(f => f.id));
+  const loose = sorted.filter(s => !ids.has(s.folderId));
+  $('#list').innerHTML = '<div class="lt"><button class="mk" data-nf="1">＋ フォルダを作成</button></div>' + (folders.length
+    ? [...folders].sort((a, b) => a.createdAt - b.createdAt).map(f => grp(f, sorted.filter(s => s.folderId === f.id))).join('') + (loose.length ? grp(null, loose) : '')
+    : loose.length ? loose.map(item).join('') : `<p class="empty">${spots.length ? '条件に合うスポットがありません' : '地図をタップするか、検索して、最初のスポットを登録しましょう'}</p>`);
 }
 
-$('#list').onclick = e => {
-  const b = e.target.closest('.it'); if (!b) return;
-  const s = spots.find(x => x.id === b.dataset.id);
-  setView('map');
-  map.setView([s.lat, s.lng], 15);
-  openSheet(s);
+$('#list').onclick = async e => {
+  const t = e.target.closest('button'); if (!t) return;
+  const d = t.dataset;
+  try {
+    if (d.nf) { const n = askName('新しいフォルダの名前'); if (n) await addFolder(n); }
+    else if (d.t) { collapsed.has(d.t) ? collapsed.delete(d.t) : collapsed.add(d.t); render(); }
+    else if (d.r) {
+      const f = folders.find(x => x.id === d.r), n = askName('フォルダ名', f.name);
+      if (n) { f.name = n; f.updatedAt = Date.now(); await Store.saveFolder(f); render(); }
+    } else if (d.d) {
+      const f = folders.find(x => x.id === d.d);
+      if (!confirm(`フォルダ「${f.name}」を削除しますか？\n中のスポットは削除されず「未分類」に戻ります。`)) return;
+      const moved = spots.filter(x => x.folderId === f.id);
+      moved.forEach(x => { x.folderId = ''; x.updatedAt = Date.now(); });
+      await Promise.all(moved.map(x => Store.save(x)));
+      await Store.removeFolder(f.id);
+      folders = folders.filter(x => x.id !== f.id); render();
+    } else if (d.id) {
+      const sp = spots.find(x => x.id === d.id);
+      setView('map'); map.setView([sp.lat, sp.lng], 15); openSheet(sp);
+    }
+  } catch { toast('保存に失敗しました'); }
 };
 
 function setView(v) {
@@ -270,7 +316,7 @@ $('#res').onclick = e => {
 
 /* ---------- 登録・詳細シート ---------- */
 function startNew(p) {
-  openSheet({id: uid(), name: p.name || '', lat: p.lat, lng: p.lng, region: p.region || '', category: '', tag: '', visited: false, visitDate: '', memo: ''}, true);
+  openSheet({id: uid(), name: p.name || '', lat: p.lat, lng: p.lng, region: p.region || '', categories: [], tags: [], folderId: '', visited: false, visitDate: '', memo: ''}, true);
   if (!p.name || !p.region) reverse(p);
 }
 
@@ -299,7 +345,7 @@ function openSheet(spot, isNew) {
   }
   $('#stt').textContent = isNew ? '新しいスポット' : 'スポットの詳細';
   $('#nm').value = spot.name; delete $('#nm').dataset.d;
-  $('#rg').value = spot.region; cur.cat = spot.category; fillCt(spot.category); $('#tg').value = spot.tag;
+  $('#rg').value = spot.region; cur.fd = spot.folderId; fillFd(spot.folderId); drawChips('#cts', cats(), spot.categories); drawChips('#tgs', tagList(), spot.tags);
   $('#vd').value = spot.visitDate || ''; $('#mm').value = spot.memo || '';
   $('#del').hidden = !!isNew;
   showCoord(); showPhoto();
@@ -338,16 +384,32 @@ async function shrink(file) {   // 長辺1600pxのJPEGに縮小して容量を�
 
 $('#nm').oninput = e => e.target.dataset.d = 1;
 
-function fillCt(v) {   // 種類セレクトを作り直す（vが未登録の新種類でも選択肢に含める）
-  const l = cats(); if (v && !l.includes(v)) l.push(v);
-  $('#ct').innerHTML = '<option value="">選択…</option>' + l.map(c => `<option>${esc(c)}</option>`).join('') + '<option value="__new">＋ 新しい種類を追加…</option>';
-  $('#ct').value = v || '';
+function drawChips(id, all, sel) {
+  const l = [...new Set([...all, ...sel])];
+  $(id).innerHTML = l.map(v => `<label class="chip"><input type="checkbox" value="${esc(v)}" ${sel.includes(v) ? 'checked' : ''}><span>${esc(v)}</span></label>`).join('') + '<button type="button" class="add">＋ 追加</button>';
 }
-$('#ct').onchange = e => {
-  if (e.target.value !== '__new') { cur.cat = e.target.value; return; }
-  const n = (prompt('新しい種類の名前（例：ロケ地、温泉）') || '').trim().slice(0, 20);
-  fillCt(n || cur.cat || '');
-  cur.cat = $('#ct').value;
+const getChips = id => [...document.querySelectorAll(id + ' input:checked')].map(i => i.value);
+const addChip = (id, all, ask) => $(id).onclick = e => {
+  if (!e.target.closest('.add')) return;
+  const n = (prompt(ask) || '').trim().slice(0, 20);
+  if (n) drawChips(id, all(), [...getChips(id), n]);
+};
+addChip('#cts', cats, '新しい種類の名前（例：ロケ地、温泉）');
+addChip('#tgs', tagList, '作品名・タグの名前（例：ゆるキャン△）');
+
+function fillFd(v) {
+  $('#fd').innerHTML = '<option value="">未分類</option>' + folders.map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join('') + '<option value="__new">＋ 新しいフォルダ…</option>';
+  $('#fd').value = v || '';
+}
+async function addFolder(name) {
+  const now = Date.now(), f = {id: uid(), name, createdAt: now, updatedAt: now};
+  await Store.saveFolder(f); folders.push(f); render(); return f;
+}
+$('#fd').onchange = async e => {
+  if (e.target.value !== '__new') { cur.fd = e.target.value; return; }
+  const n = askName('新しいフォルダの名前');
+  try { const f = n && await addFolder(n); if (f) cur.fd = f.id; } catch { toast('フォルダを作れませんでした'); }
+  fillFd(cur.fd);
 };
 $('#cl').onclick = closeSheet;
 $('#rm').onclick = () => { cur.photo = null; showPhoto(); };
@@ -363,7 +425,7 @@ $('#ph').onchange = async e => {
 $('#sheet').onsubmit = async e => {
   e.preventDefault();
   const s = cur.spot, now = Date.now(), had = !!photoURL[s.id];
-  Object.assign(s, {name: $('#nm').value.trim(), region: $('#rg').value, category: $('#ct').value, tag: $('#tg').value.trim(), visitDate: $('#vd').value, memo: $('#mm').value.trim(), updatedAt: now});
+  Object.assign(s, {name: $('#nm').value.trim(), region: $('#rg').value, categories: getChips('#cts').length ? getChips('#cts') : ['その他'], tags: getChips('#tgs'), folderId: $('#fd').value, visitDate: $('#vd').value, memo: $('#mm').value.trim(), updatedAt: now});
   const has = cur.photo === null ? false : cur.photo ? true : had;
   s.visited = has;
   if (has && !s.visitDate) s.visitDate = today();
@@ -392,7 +454,8 @@ function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; 
 /* ---------- 起動 ---------- */
 (async () => {
   try {
-    spots = await Store.spots();
+    spots = (await Store.spots()).map(norm);
+    folders = await Store.folders();
     for (const p of await Store.photos()) photoURL[p.spotId] = URL.createObjectURL(p.blob);
   } catch { toast('保存領域を開けませんでした（プライベートブラウズでは動かない場合があります）'); }
   render(); fit();
