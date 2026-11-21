@@ -254,9 +254,12 @@ function render() {
   const grp = (f, items) => `<section class="gp"><div class="gh"><button class="tgl" data-t="${fk(f)}">${collapsed.has(fk(f)) ? '▸' : '▾'} <b>${f ? esc(f.name) : '未分類'}</b><small>${items.length}件</small></button>${f ? `<button class="mn" data-r="${f.id}">名前変更</button><button class="mn" data-d="${f.id}">削除</button>` : ''}</div>${collapsed.has(fk(f)) ? '' : items.map(item).join('') || '<p class="hint">空のフォルダです。スポット詳細の「フォルダ」で入れられます</p>'}</section>`;
   const ids = new Set(folders.map(f => f.id));
   const loose = sorted.filter(s => !ids.has(s.folderId));
+  const active = F.r || F.c || F.t;   // 絞り込み中は、該当するスポットがないフォルダを隠す（すべて表示のときは全フォルダを表示）
+  const gs = [...folders].sort((a, b) => a.createdAt - b.createdAt).map(f => [f, sorted.filter(s => s.folderId === f.id)]).filter(([, it]) => it.length || !active);
+  const none = `<p class="empty">${spots.length ? '条件に合うスポットがありません' : '地図をタップするか、検索して、最初のスポットを登録しましょう'}</p>`;
   $('#list').innerHTML = '<div class="lt"><button class="mk" data-nf="1">＋ フォルダを作成</button></div>' + (folders.length
-    ? [...folders].sort((a, b) => a.createdAt - b.createdAt).map(f => grp(f, sorted.filter(s => s.folderId === f.id))).join('') + (loose.length ? grp(null, loose) : '')
-    : loose.length ? loose.map(item).join('') : `<p class="empty">${spots.length ? '条件に合うスポットがありません' : '地図をタップするか、検索して、最初のスポットを登録しましょう'}</p>`);
+    ? (gs.length || loose.length ? gs.map(([f, it]) => grp(f, it)).join('') + (loose.length ? grp(null, loose) : '') : none)
+    : loose.length ? loose.map(item).join('') : none);
 }
 
 $('#list').onclick = async e => {
