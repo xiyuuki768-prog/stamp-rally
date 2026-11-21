@@ -20,8 +20,11 @@ h1{font-size:18px;margin:0;letter-spacing:.04em}
 #count{background:var(--seal);border-radius:99px;padding:1px 12px;font-size:13px;font-weight:700}
 .sw{position:relative}
 #sf{display:flex;gap:6px}
-#q{flex:1;min-width:0;font-size:16px;padding:9px 12px;border:0;border-radius:8px;color:var(--ink)}
-#sf button{border:0;border-radius:8px;background:#fff;color:var(--ink);font-weight:700;padding:0 14px}
+#q{width:100%;min-width:0;font-size:16px;padding:9px 38px 9px 12px;border:0;border-radius:8px;color:var(--ink)}
+#q::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none}
+.qw{position:relative;flex:1;min-width:0}
+#qx{position:absolute;right:2px;top:50%;transform:translateY(-50%);width:36px;height:36px;border:0;background:none;color:var(--mut);font-size:16px;padding:0}
+#sf>button{border:0;border-radius:8px;background:#fff;color:var(--ink);font-weight:700;padding:0 14px}
 #res{position:absolute;left:0;right:0;top:100%;margin:6px 0 0;padding:4px;list-style:none;background:#fff;color:var(--ink);border-radius:10px;box-shadow:0 8px 24px #0004;max-height:50dvh;overflow:auto;z-index:2500}
 #res button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;border-radius:6px}
 #res button:hover{background:var(--paper)}
@@ -96,7 +99,7 @@ legend{padding:0 6px;font-weight:700}
 <header>
   <div class="top"><h1>全国スタンプ帖</h1><span id="count">0 / 0 獲得</span></div>
   <div class="sw">
-    <form id="sf"><input id="q" type="search" placeholder="地名・スポット名で検索" autocomplete="off"><button>検索</button></form>
+    <form id="sf"><span class="qw"><input id="q" type="search" placeholder="地名・スポット名で検索" autocomplete="off"><button type="button" id="qx" hidden aria-label="入力を消す">✕</button></span><button>検索</button></form>
     <ul id="res" hidden></ul>
   </div>
   <div class="flt"><select id="flr" aria-label="地域"></select><select id="flc" aria-label="種類"></select><select id="flt" aria-label="作品・タグ"></select></div>
@@ -254,8 +257,8 @@ function render() {
   const grp = (f, items) => `<section class="gp"><div class="gh"><button class="tgl" data-t="${fk(f)}">${collapsed.has(fk(f)) ? '▸' : '▾'} <b>${f ? esc(f.name) : '未分類'}</b><small>${items.length}件</small></button>${f ? `<button class="mn" data-r="${f.id}">名前変更</button><button class="mn" data-d="${f.id}">削除</button>` : ''}</div>${collapsed.has(fk(f)) ? '' : items.map(item).join('') || '<p class="hint">空のフォルダです。スポット詳細の「フォルダ」で入れられます</p>'}</section>`;
   const ids = new Set(folders.map(f => f.id));
   const loose = sorted.filter(s => !ids.has(s.folderId));
-  const active = F.r || F.c || F.t;   // 絞り込み中は、該当するスポットがないフォルダを隠す（すべて表示のときは全フォルダを表示）
-  const gs = [...folders].sort((a, b) => a.createdAt - b.createdAt).map(f => [f, sorted.filter(s => s.folderId === f.id)]).filter(([, it]) => it.length || !active);
+  const active = F.r || F.c || F.t;   // 絞り込み中は「中身はあるが該当スポットがない」フォルダを隠す（空のフォルダは削除できるよう常に表示）
+  const gs = [...folders].sort((a, b) => a.createdAt - b.createdAt).map(f => [f, sorted.filter(s => s.folderId === f.id)]).filter(([f, it]) => it.length || !active || !spots.some(s => s.folderId === f.id));
   const none = `<p class="empty">${spots.length ? '条件に合うスポットがありません' : '地図をタップするか、検索して、最初のスポットを登録しましょう'}</p>`;
   $('#list').innerHTML = '<div class="lt"><button class="mk" data-nf="1">＋ フォルダを作成</button></div>' + (folders.length
     ? (gs.length || loose.length ? gs.map(([f, it]) => grp(f, it)).join('') + (loose.length ? grp(null, loose) : '') : none)
@@ -295,7 +298,8 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => setView(b
 
 /* ---------- 検索（Nominatim） ---------- */
 const hideRes = () => $('#res').hidden = true;
-$('#q').oninput = e => { if (!e.target.value) hideRes(); };
+$('#q').oninput = e => { $('#qx').hidden = !e.target.value; if (!e.target.value) hideRes(); };
+$('#qx').onclick = () => { $('#q').value = ''; $('#qx').hidden = true; hideRes(); $('#q').focus(); };
 $('#sf').onsubmit = async e => {
   e.preventDefault();
   const q = $('#q').value.trim(); if (!q) return;
@@ -406,7 +410,7 @@ function fillFd(v) {
 }
 async function addFolder(name) {
   const now = Date.now(), f = {id: uid(), name, createdAt: now, updatedAt: now};
-  await Store.saveFolder(f); folders.push(f); render(); return f;
+  await Store.saveFolder(f); folders.push(f); collapsed.add(f.id); render(); return f;
 }
 $('#fd').onchange = async e => {
   if (e.target.value !== '__new') { cur.fd = e.target.value; return; }
@@ -459,6 +463,7 @@ function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; 
   try {
     spots = (await Store.spots()).map(norm);
     folders = await Store.folders();
+    folders.forEach(f => collapsed.add(f.id));   // フォルダは最初は折りたたむ（未分類は開いたまま）
     for (const p of await Store.photos()) photoURL[p.spotId] = URL.createObjectURL(p.blob);
   } catch { toast('保存領域を開けませんでした（プライベートブラウズでは動かない場合があります）'); }
   render(); fit();
