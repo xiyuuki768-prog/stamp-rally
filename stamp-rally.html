@@ -125,6 +125,9 @@ const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).
 /* ---------- マスタ ---------- */
 const REGIONS = ['北海道・東北','関東','中部','近畿','中国・四国','九州・沖縄'];
 const CATS = {'アニメ聖地':'聖','グルメ':'食','観光':'観','その他':'他'};
+const glyph = c => CATS[c] || [...(c || '他')][0];
+// 種類 = 標準4種 + 登録済みスポットで使われている種類（自分で追加した分は保存すると残る）
+const cats = () => [...new Set([...Object.keys(CATS), ...spots.map(s => s.category).filter(Boolean)])];
 const PREF = [
   '北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県',
   '茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県',
@@ -183,16 +186,14 @@ const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZo
 L.control.layers({'地理院地図': gsi, 'OpenStreetMap': osm}).addTo(map);
 L.control.zoom({position: 'bottomright'}).addTo(map);
 const layer = L.layerGroup().addTo(map);
-const icon = (s, cls) => L.divIcon({className: '', html: `<div class="pin ${cls}"><b>${s ? CATS[s.category] || '他' : '＋'}</b></div>`, iconSize: [30, 30], iconAnchor: [15, 36]});
+const icon = (s, cls) => L.divIcon({className: '', html: `<div class="pin ${cls}"><b>${s ? glyph(s.category) : '＋'}</b></div>`, iconSize: [30, 30], iconAnchor: [15, 36]});
 
 map.on('click', e => { hideRes(); startNew({lat: e.latlng.lat, lng: e.latlng.lng}); });
 
 /* ---------- 絞り込み・描画 ---------- */
 const fillSel = (el, ph, arr) => el.innerHTML = `<option value="">${ph}</option>` + arr.map(v => `<option>${esc(v)}</option>`).join('');
 fillSel($('#flr'), '地域：すべて', REGIONS);
-fillSel($('#flc'), '種類：すべて', Object.keys(CATS));
 fillSel($('#rg'), '選択…', REGIONS);
-fillSel($('#ct'), '選択…', Object.keys(CATS));
 ['flr', 'flc', 'flt'].forEach(id => $('#' + id).onchange = () => {
   F = {r: $('#flr').value, c: $('#flc').value, t: $('#flt').value};
   render(); fit();
@@ -210,6 +211,9 @@ function render() {
   if (F.t && !tags.includes(F.t)) F.t = '';
   $('#flt').innerHTML = '<option value="">作品・タグ：すべて</option>' + tags.map(t => `<option ${t === F.t ? 'selected' : ''}>${esc(t)}</option>`).join('');
   $('#tl').innerHTML = tags.map(t => `<option value="${esc(t)}">`).join('');
+  const cl = cats();
+  if (F.c && !cl.includes(F.c)) F.c = '';
+  $('#flc').innerHTML = '<option value="">種類：すべて</option>' + cl.map(c => `<option ${c === F.c ? 'selected' : ''}>${esc(c)}</option>`).join('');
 
   const shown = filtered();
   layer.clearLayers();
@@ -218,7 +222,7 @@ function render() {
 
   $('#list').innerHTML = shown.length ? [...shown].sort((a, b) => b.createdAt - a.createdAt).map(s => `
     <button class="it" data-id="${s.id}">
-      ${photoURL[s.id] ? `<img class="th" src="${photoURL[s.id]}" alt="">` : `<span class="th">${CATS[s.category] || '他'}</span>`}
+      ${photoURL[s.id] ? `<img class="th" src="${photoURL[s.id]}" alt="">` : `<span class="th">${glyph(s.category)}</span>`}
       <span class="bd"><b>${esc(s.name)}</b><small>${esc(s.region)}・${esc(s.category)}${s.tag ? '・' + esc(s.tag) : ''}${s.visited && s.visitDate ? '・' + esc(s.visitDate) : ''}</small></span>
       <span class="st ${s.visited ? 'on' : ''}">${s.visited ? '獲得' : '未訪問'}</span>
     </button>`).join('')
@@ -295,7 +299,7 @@ function openSheet(spot, isNew) {
   }
   $('#stt').textContent = isNew ? '新しいスポット' : 'スポットの詳細';
   $('#nm').value = spot.name; delete $('#nm').dataset.d;
-  $('#rg').value = spot.region; $('#ct').value = spot.category; $('#tg').value = spot.tag;
+  $('#rg').value = spot.region; cur.cat = spot.category; fillCt(spot.category); $('#tg').value = spot.tag;
   $('#vd').value = spot.visitDate || ''; $('#mm').value = spot.memo || '';
   $('#del').hidden = !!isNew;
   showCoord(); showPhoto();
@@ -333,6 +337,18 @@ async function shrink(file) {   // 長辺1600pxのJPEGに縮小して容量を�
 }
 
 $('#nm').oninput = e => e.target.dataset.d = 1;
+
+function fillCt(v) {   // 種類セレクトを作り直す（vが未登録の新種類でも選択肢に含める）
+  const l = cats(); if (v && !l.includes(v)) l.push(v);
+  $('#ct').innerHTML = '<option value="">選択…</option>' + l.map(c => `<option>${esc(c)}</option>`).join('') + '<option value="__new">＋ 新しい種類を追加…</option>';
+  $('#ct').value = v || '';
+}
+$('#ct').onchange = e => {
+  if (e.target.value !== '__new') { cur.cat = e.target.value; return; }
+  const n = (prompt('新しい種類の名前（例：ロケ地、温泉）') || '').trim().slice(0, 20);
+  fillCt(n || cur.cat || '');
+  cur.cat = $('#ct').value;
+};
 $('#cl').onclick = closeSheet;
 $('#rm').onclick = () => { cur.photo = null; showPhoto(); };
 $('#ph').onchange = async e => {
