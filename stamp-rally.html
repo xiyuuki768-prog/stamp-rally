@@ -93,6 +93,14 @@ legend{padding:0 6px;font-weight:700}
 .tgl small{color:var(--mut);margin-left:6px}
 .mn{background:none;border:0;color:var(--mut);font-size:13px;padding:6px}
 .hint{color:var(--mut);font-size:13px;margin:4px 0 8px}
+.cs{display:flex;align-items:center;gap:8px;margin:20px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--ink)}
+.cs b{font-size:16px}
+.cs small{color:var(--mut);flex:1}
+.cs .add{padding:4px 10px;font-size:13px}
+.lk{float:right;background:none;border:0;color:var(--seal);font-size:13px;padding:0 4px}
+#tgs.del .chip span{border-color:var(--seal);color:var(--seal)}
+#tgs.del .chip span::after{content:' ✕'}
+#tgs.del .chip input:checked+span{background:#fff}
 </style>
 </head>
 <body data-v="map">
@@ -114,12 +122,10 @@ legend{padding:0 6px;font-weight:700}
   <div class="hd"><h2 id="stt"></h2><button type="button" class="x" id="cl">閉じる</button></div>
   <label>名称<input id="nm" required maxlength="100"></label>
   <p class="sub" id="coord"></p>
-  <div class="row">
-    <label>地域<select id="rg" required></select></label>
-    <label>フォルダ<select id="fd"></select></label>
-  </div>
+  <label>地域<select id="rg" required></select></label>
   <div class="lb">種類（複数選べます）</div><div class="chips" id="cts"></div>
-  <div class="lb">作品名・タグ（複数選べます）</div><div class="chips" id="tgs"></div>
+  <div class="lb">作品名・タグ（複数選べます）<button type="button" class="lk" id="tgm">削除モード</button></div><div class="chips" id="tgs"></div>
+  <div id="fds"></div>
   <fieldset>
     <legend>スタンプ</legend>
     <div id="pv"></div>
@@ -147,10 +153,10 @@ const REGIONS = ['北海道・東北','関東','中部','近畿','中国・四�
 const CATS = {'アニメ聖地':'聖','グルメ':'食','観光':'観','その他':'他'};
 const glyph = c => CATS[c] || [...(c || '他')][0];
 // 種類 = 標準4種 + 登録済みスポットで使われている種類（自分で追加した分は保存すると残る）
-const cats = () => [...new Set([...Object.keys(CATS), ...spots.flatMap(s => s.categories)])];
+const cats = () => [...new Set([...Object.keys(CATS), ...spots.flatMap(s => s.categories), ...folders.map(f => f.category)])];
 const tagList = () => [...new Set(spots.flatMap(s => s.tags))].sort();
 // 旧データ（category / tag が1つだけ）を複数対応の形に変換
-const norm = s => { s.categories = s.categories || (s.category ? [s.category] : []); s.tags = s.tags || (s.tag ? [s.tag] : []); s.folderId = s.folderId || ''; delete s.category; delete s.tag; return s; };
+const norm = s => { s.categories = s.categories || (s.category ? [s.category] : []); s.tags = s.tags || (s.tag ? [s.tag] : []); s.folderIds = s.folderIds || (s.folderId ? [s.folderId] : []); delete s.folderId; delete s.category; delete s.tag; return s; };
 const PREF = [
   '北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県',
   '茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県',
@@ -163,8 +169,8 @@ const regionOf = st => { const i = PREF.findIndex(g => g.split(' ').includes(st)
 /* ---------- データ層 ----------
    画面側は Store の5メソッドしか使わない。
    クラウドDB・PC同期を足すときは、同じ形のオブジェクト（Firestore/Supabase等）に差し替える。
-   spots: {id, name, lat, lng, region, categories[], tags[], folderId, visited, visitDate, memo, createdAt, updatedAt}
-   folders: {id, name, createdAt, updatedAt}
+   spots: {id, name, lat, lng, region, categories[], tags[], folderIds[], visited, visitDate, memo, createdAt, updatedAt}
+   folders: {id, name, category, createdAt, updatedAt}   ※フォルダは種類ごとに作る
    photos: {spotId, blob, updatedAt}  ※写真は別ストアに分離（同期時に個別アップロードしやすい） */
 const Store = (() => {
   let dbp;
@@ -223,6 +229,7 @@ fillSel($('#flr'), '地域：すべて', REGIONS);
 fillSel($('#rg'), '選択…', REGIONS);
 ['flr', 'flc', 'flt'].forEach(id => $('#' + id).onchange = () => {
   F = {r: $('#flr').value, c: $('#flc').value, t: $('#flt').value};
+  try { localStorage.setItem('stamp-c', F.c); } catch {}   // 最後に見た種類を覚える
   render(); fit();
 });
 
@@ -238,8 +245,9 @@ function render() {
   if (F.t && !tags.includes(F.t)) F.t = '';
   $('#flt').innerHTML = '<option value="">作品・タグ：すべて</option>' + tags.map(t => `<option ${t === F.t ? 'selected' : ''}>${esc(t)}</option>`).join('');
   const cl = cats();
-  if (F.c && !cl.includes(F.c)) F.c = '';
-  $('#flc').innerHTML = '<option value="">種類：すべて</option>' + cl.map(c => `<option ${c === F.c ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  if (!cl.includes(F.c)) F.c = cl[0];
+  $('#flc').innerHTML = cl.map(c => `<option ${c === F.c ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  $('#flr').value = F.r;
 
   const shown = filtered();
   layer.clearLayers();
@@ -253,32 +261,37 @@ function render() {
       <span class="st ${s.visited ? 'on' : ''}">${s.visited ? '獲得' : '未訪問'}</span>
     </button>`;
   const sorted = [...shown].sort((a, b) => b.createdAt - a.createdAt);
-  const fk = f => f ? f.id : '_';
-  const grp = (f, items) => `<section class="gp"><div class="gh"><button class="tgl" data-t="${fk(f)}">${collapsed.has(fk(f)) ? '▸' : '▾'} <b>${f ? esc(f.name) : '未分類'}</b><small>${items.length}件</small></button>${f ? `<button class="mn" data-r="${f.id}">名前変更</button><button class="mn" data-d="${f.id}">削除</button>` : ''}</div>${collapsed.has(fk(f)) ? '' : items.map(item).join('') || '<p class="hint">空のフォルダです。スポット詳細の「フォルダ」で入れられます</p>'}</section>`;
-  const ids = new Set(folders.map(f => f.id));
-  const loose = sorted.filter(s => !ids.has(s.folderId));
-  const active = F.r || F.c || F.t;   // 絞り込み中は「中身はあるが該当スポットがない」フォルダを隠す（空のフォルダは削除できるよう常に表示）
-  const gs = [...folders].sort((a, b) => a.createdAt - b.createdAt).map(f => [f, sorted.filter(s => s.folderId === f.id)]).filter(([f, it]) => it.length || !active || !spots.some(s => s.folderId === f.id));
-  const none = `<p class="empty">${spots.length ? '条件に合うスポットがありません' : '地図をタップするか、検索して、最初のスポットを登録しましょう'}</p>`;
-  $('#list').innerHTML = '<div class="lt"><button class="mk" data-nf="1">＋ フォルダを作成</button></div>' + (folders.length
-    ? (gs.length || loose.length ? gs.map(([f, it]) => grp(f, it)).join('') + (loose.length ? grp(null, loose) : '') : none)
-    : loose.length ? loose.map(item).join('') : none);
+  const active = F.r || F.c || F.t;
+  const grp = (key, name, items, f) => `<section class="gp"><div class="gh"><button class="tgl" data-t="${esc(key)}">${collapsed.has(key) ? '▸' : '▾'} <b>${esc(name)}</b><small>${items.length}件</small></button>${f ? `<button class="mn" data-r="${f.id}">名前変更</button><button class="mn" data-d="${f.id}">削除</button>` : ''}</div>${collapsed.has(key) ? '' : items.map(item).join('') || '<p class="hint">空です。スポット詳細の「フォルダ」で入れられます</p>'}</section>`;
+  // 種類ごとのセクション：フォルダはその種類の中だけ。他の種類にも属するスポットは、そちらの種類では（フォルダに入っていなければ）未分類として普通に出る
+  const sec = c => {
+    const inC = sorted.filter(s => s.categories.includes(c));
+    const fs = folders.filter(f => f.category === c).sort((a, b) => a.createdAt - b.createdAt);
+    const hasMember = f => spots.some(s => s.folderIds.includes(f.id) && s.categories.includes(c));
+    const gs = fs.map(f => [f, inC.filter(s => s.folderIds.includes(f.id))]).filter(([f, it]) => it.length || !active || !hasMember(f));
+    const loose = inC.filter(s => !fs.some(f => s.folderIds.includes(f.id)));
+    if (!inC.length && !gs.length && F.c !== c) return '';
+    return `<div class="cs"><b>${esc(c)}</b><small>${inC.length}件</small><button class="add" data-nf="${esc(c)}">＋ フォルダ</button></div>`
+      + gs.map(([f, it]) => grp(f.id, f.name, it, f)).join('') + (loose.length ? grp('_' + c, '未分類', loose) : '');
+  };
+  const html = cats().map(c => F.c && F.c !== c ? '' : sec(c)).join('');
+  $('#list').innerHTML = html || `<p class="empty">${spots.length ? '条件に合うスポットがありません' : '地図をタップするか、検索して、最初のスポットを登録しましょう'}</p>`;
 }
 
 $('#list').onclick = async e => {
   const t = e.target.closest('button'); if (!t) return;
   const d = t.dataset;
   try {
-    if (d.nf) { const n = askName('新しいフォルダの名前'); if (n) await addFolder(n); }
+    if (d.nf) { const n = askName(`「${d.nf}」のフォルダ名`); if (n) await addFolder(n, d.nf); }
     else if (d.t) { collapsed.has(d.t) ? collapsed.delete(d.t) : collapsed.add(d.t); render(); }
     else if (d.r) {
       const f = folders.find(x => x.id === d.r), n = askName('フォルダ名', f.name);
       if (n) { f.name = n; f.updatedAt = Date.now(); await Store.saveFolder(f); render(); }
     } else if (d.d) {
       const f = folders.find(x => x.id === d.d);
-      if (!confirm(`フォルダ「${f.name}」を削除しますか？\n中のスポットは削除されず「未分類」に戻ります。`)) return;
-      const moved = spots.filter(x => x.folderId === f.id);
-      moved.forEach(x => { x.folderId = ''; x.updatedAt = Date.now(); });
+      if (!confirm(`フォルダ「${f.name}」（${f.category}）を削除しますか？\nスポットは削除されません。`)) return;
+      const moved = spots.filter(x => x.folderIds.includes(f.id));
+      moved.forEach(x => { x.folderIds = x.folderIds.filter(i => i !== f.id); x.updatedAt = Date.now(); });
       await Promise.all(moved.map(x => Store.save(x)));
       await Store.removeFolder(f.id);
       folders = folders.filter(x => x.id !== f.id); render();
@@ -323,7 +336,7 @@ $('#res').onclick = e => {
 
 /* ---------- 登録・詳細シート ---------- */
 function startNew(p) {
-  openSheet({id: uid(), name: p.name || '', lat: p.lat, lng: p.lng, region: p.region || '', categories: [], tags: [], folderId: '', visited: false, visitDate: '', memo: ''}, true);
+  openSheet({id: uid(), name: p.name || '', lat: p.lat, lng: p.lng, region: p.region || '', categories: F.c ? [F.c] : [], tags: [], folderIds: [], visited: false, visitDate: '', memo: ''}, true);
   if (!p.name || !p.region) reverse(p);
 }
 
@@ -352,7 +365,8 @@ function openSheet(spot, isNew) {
   }
   $('#stt').textContent = isNew ? '新しいスポット' : 'スポットの詳細';
   $('#nm').value = spot.name; delete $('#nm').dataset.d;
-  $('#rg').value = spot.region; cur.fd = spot.folderId; fillFd(spot.folderId); drawChips('#cts', cats(), spot.categories); drawChips('#tgs', tagList(), spot.tags);
+  $('#rg').value = spot.region; cur.fids = [...spot.folderIds]; drawChips('#cts', cats(), spot.categories); drawChips('#tgs', tagList(), spot.tags); drawFds();
+  $('#tgs').classList.remove('del'); $('#tgm').textContent = '削除モード';
   $('#vd').value = spot.visitDate || ''; $('#mm').value = spot.memo || '';
   $('#del').hidden = !!isNew;
   showCoord(); showPhoto();
@@ -396,28 +410,53 @@ function drawChips(id, all, sel) {
   $(id).innerHTML = l.map(v => `<label class="chip"><input type="checkbox" value="${esc(v)}" ${sel.includes(v) ? 'checked' : ''}><span>${esc(v)}</span></label>`).join('') + '<button type="button" class="add">＋ 追加</button>';
 }
 const getChips = id => [...document.querySelectorAll(id + ' input:checked')].map(i => i.value);
-const addChip = (id, all, ask) => $(id).onclick = e => {
+const addChip = (id, all, ask, after) => $(id).onclick = e => {
   if (!e.target.closest('.add')) return;
   const n = (prompt(ask) || '').trim().slice(0, 20);
-  if (n) drawChips(id, all(), [...getChips(id), n]);
+  if (n) { drawChips(id, all(), [...getChips(id), n]); if (after) after(); }
 };
-addChip('#cts', cats, '新しい種類の名前（例：ロケ地、温泉）');
+
+// フォルダ選択：選んだ種類ごとに、その種類のフォルダだけを複数選べる
+function drawFds() {
+  $('#fds').innerHTML = getChips('#cts').map(c => `<div class="lb">フォルダ：${esc(c)}（複数選べます）</div><div class="chips" data-c="${esc(c)}">`
+    + folders.filter(f => f.category === c).map(f => `<label class="chip"><input type="checkbox" value="${f.id}" ${cur.fids.includes(f.id) ? 'checked' : ''}><span>${esc(f.name)}</span></label>`).join('')
+    + '<button type="button" class="add">＋ 追加</button></div>').join('');
+}
+addChip('#cts', cats, '新しい種類の名前（例：ロケ地、温泉）', drawFds);
 addChip('#tgs', tagList, '作品名・タグの名前（例：ゆるキャン△）');
 
-function fillFd(v) {
-  $('#fd').innerHTML = '<option value="">未分類</option>' + folders.map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join('') + '<option value="__new">＋ 新しいフォルダ…</option>';
-  $('#fd').value = v || '';
+// 作品・タグの削除：全スポットから外し、候補からも消す（スポット自体は消えない）
+async function removeTag(v) {
+  const moved = spots.filter(x => x.tags.includes(v));
+  moved.forEach(x => { x.tags = x.tags.filter(t => t !== v); x.updatedAt = Date.now(); });
+  await Promise.all(moved.map(x => Store.save(x)));
+  if (F.t === v) F.t = '';
+  render();
+  drawChips('#tgs', tagList(), getChips('#tgs').filter(t => t !== v));
 }
-async function addFolder(name) {
-  const now = Date.now(), f = {id: uid(), name, createdAt: now, updatedAt: now};
+$('#tgm').onclick = () => { const on = $('#tgs').classList.toggle('del'); $('#tgm').textContent = on ? '完了' : '削除モード'; };
+$('#tgs').addEventListener('click', async e => {
+  const l = e.target.closest('.chip');
+  if (!l || !$('#tgs').classList.contains('del')) return;
+  e.preventDefault();
+  const v = l.querySelector('input').value;
+  if (!confirm(`「${v}」を全スポットから外して、候補からも削除しますか？\nスポット自体は消えません。`)) return;
+  try { await removeTag(v); } catch { toast('削除に失敗しました'); }
+});
+$('#cts').onchange = drawFds;
+$('#fds').onchange = e => { const i = e.target; cur.fids = i.checked ? [...new Set([...cur.fids, i.value])] : cur.fids.filter(x => x !== i.value); };
+$('#fds').onclick = async e => {
+  const b = e.target.closest('.add'); if (!b) return;
+  const c = b.parentElement.dataset.c, n = askName(`「${c}」の新しいフォルダ名`);
+  if (!n) return;
+  try { const f = await addFolder(n, c); if (!cur.fids.includes(f.id)) cur.fids.push(f.id); drawFds(); } catch { toast('フォルダを作れませんでした'); }
+};
+async function addFolder(name, category) {
+  const dup = folders.find(f => f.category === category && f.name === name);
+  if (dup) return dup;
+  const now = Date.now(), f = {id: uid(), name, category, createdAt: now, updatedAt: now};
   await Store.saveFolder(f); folders.push(f); collapsed.add(f.id); render(); return f;
 }
-$('#fd').onchange = async e => {
-  if (e.target.value !== '__new') { cur.fd = e.target.value; return; }
-  const n = askName('新しいフォルダの名前');
-  try { const f = n && await addFolder(n); if (f) cur.fd = f.id; } catch { toast('フォルダを作れませんでした'); }
-  fillFd(cur.fd);
-};
 $('#cl').onclick = closeSheet;
 $('#rm').onclick = () => { cur.photo = null; showPhoto(); };
 $('#ph').onchange = async e => {
@@ -432,7 +471,8 @@ $('#ph').onchange = async e => {
 $('#sheet').onsubmit = async e => {
   e.preventDefault();
   const s = cur.spot, now = Date.now(), had = !!photoURL[s.id];
-  Object.assign(s, {name: $('#nm').value.trim(), region: $('#rg').value, categories: getChips('#cts').length ? getChips('#cts') : ['その他'], tags: getChips('#tgs'), folderId: $('#fd').value, visitDate: $('#vd').value, memo: $('#mm').value.trim(), updatedAt: now});
+  const cs = getChips('#cts').length ? getChips('#cts') : ['その他'];
+  Object.assign(s, {name: $('#nm').value.trim(), region: $('#rg').value, categories: cs, tags: getChips('#tgs'), folderIds: cur.fids.filter(id => { const f = folders.find(x => x.id === id); return f && cs.includes(f.category); }), visitDate: $('#vd').value, memo: $('#mm').value.trim(), updatedAt: now});
   const has = cur.photo === null ? false : cur.photo ? true : had;
   s.visited = has;
   if (has && !s.visitDate) s.visitDate = today();
@@ -442,6 +482,11 @@ $('#sheet').onsubmit = async e => {
   else if (cur.photo) { if (had) URL.revokeObjectURL(photoURL[s.id]); photoURL[s.id] = cur.url; cur.url = null; }
   const i = spots.findIndex(x => x.id === s.id);
   i < 0 ? spots.push(s) : spots[i] = s;
+  if (!filtered().includes(s)) {   // 保存したスポットが今の絞り込みから外れるときは、見える条件に合わせる
+    if (!s.categories.includes(F.c)) F.c = s.categories[0];
+    if (F.r && s.region !== F.r) F.r = '';
+    if (F.t && !s.tags.includes(F.t)) F.t = '';
+  }
   closeSheet(); render();
   toast(has ? 'スタンプを獲得しました' : '保存しました');
 };
@@ -460,9 +505,17 @@ function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; 
 
 /* ---------- 起動 ---------- */
 (async () => {
+  try { F.c = localStorage.getItem('stamp-c') || ''; } catch {}
   try {
     spots = (await Store.spots()).map(norm);
     folders = await Store.folders();
+    // 旧フォルダ（種類なし）は、入っているスポットで一番多い種類のフォルダにする
+    for (const f of folders) if (!f.category) {
+      const n = {};
+      spots.filter(x => x.folderIds.includes(f.id)).forEach(x => { const c = x.categories[0]; if (c) n[c] = (n[c] || 0) + 1; });
+      f.category = Object.keys(n).sort((a, b) => n[b] - n[a])[0] || 'その他';
+      Store.saveFolder(f).catch(() => {});
+    }
     folders.forEach(f => collapsed.add(f.id));   // フォルダは最初は折りたたむ（未分類は開いたまま）
     for (const p of await Store.photos()) photoURL[p.spotId] = URL.createObjectURL(p.blob);
   } catch { toast('保存領域を開けませんでした（プライベートブラウズでは動かない場合があります）'); }
