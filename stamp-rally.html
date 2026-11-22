@@ -67,8 +67,8 @@ label input,label select,label textarea{display:block;width:100%;margin-top:4px;
 .sub{font-size:12px;color:var(--mut);margin:6px 0 0}
 fieldset{margin:16px 0 0;padding:12px;border:1px solid var(--line);border-radius:12px}
 legend{padding:0 6px;font-weight:700}
-#pv{position:relative;aspect-ratio:4/3;border:2px dashed var(--line);border-radius:10px;background:var(--paper);overflow:hidden;display:grid;place-items:center;color:var(--mut);font-size:13px;text-align:center;padding:8px}
-#pv img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#pv{position:relative;margin-top:10px;border-radius:10px;overflow:hidden;background:#e6e9e4}
+#pv img{display:block;width:100%;max-height:46dvh;object-fit:contain}
 .seal{position:absolute;right:10px;bottom:10px;width:62px;height:62px;border:3px solid var(--seal);border-radius:50%;background:#ffffffd9;color:var(--seal);display:grid;place-items:center;font-weight:700;font-size:28px;transform:rotate(-12deg)}
 .btns{display:flex;gap:8px;margin-top:8px}
 .btn{flex:1;text-align:center;padding:9px;border:1px solid var(--ink);border-radius:8px;background:#fff;font-weight:700;margin:0;color:var(--ink);font-size:14px}
@@ -98,9 +98,9 @@ legend{padding:0 6px;font-weight:700}
 .cs small{color:var(--mut);flex:1}
 .cs .add{padding:4px 10px;font-size:13px}
 .lk{float:right;background:none;border:0;color:var(--seal);font-size:13px;padding:0 4px}
-#tgs.del .chip span{border-color:var(--seal);color:var(--seal)}
-#tgs.del .chip span::after{content:' ✕'}
-#tgs.del .chip input:checked+span{background:#fff}
+.chips.del .chip span{border-color:var(--seal);color:var(--seal)}
+.chips.del .chip span::after{content:' ✕'}
+.chips.del .chip input:checked+span{background:#fff}
 </style>
 </head>
 <body data-v="map">
@@ -121,14 +121,15 @@ legend{padding:0 6px;font-weight:700}
 <form id="sheet" aria-label="スポット詳細">
   <div class="hd"><h2 id="stt"></h2><button type="button" class="x" id="cl">閉じる</button></div>
   <label>名称<input id="nm" required maxlength="100"></label>
+  <div id="pv" hidden></div>
   <p class="sub" id="coord"></p>
   <label>地域<select id="rg" required></select></label>
-  <div class="lb">種類（複数選べます）</div><div class="chips" id="cts"></div>
+  <div class="lb">種類（複数選べます）<button type="button" class="lk" id="ctm">削除モード</button></div><div class="chips" id="cts"></div>
   <div class="lb">作品名・タグ（複数選べます）<button type="button" class="lk" id="tgm">削除モード</button></div><div class="chips" id="tgs"></div>
   <div id="fds"></div>
   <fieldset>
     <legend>スタンプ</legend>
-    <div id="pv"></div>
+    <p class="sub" id="ph0">写真を選ぶとスタンプを獲得できます</p>
     <div class="btns">
       <label class="btn">写真を選ぶ<input id="ph" type="file" accept="image/*" hidden></label>
       <button type="button" class="btn" id="rm">写真を外す</button>
@@ -153,7 +154,7 @@ const REGIONS = ['北海道・東北','関東','中部','近畿','中国・四�
 const CATS = {'アニメ聖地':'聖','グルメ':'食','観光':'観','その他':'他'};
 const glyph = c => CATS[c] || [...(c || '他')][0];
 // 種類 = 標準4種 + 登録済みスポットで使われている種類（自分で追加した分は保存すると残る）
-const cats = () => [...new Set([...Object.keys(CATS), ...spots.flatMap(s => s.categories), ...folders.map(f => f.category)])];
+const cats = () => { const l = [...new Set([...Object.keys(CATS).filter(c => !hiddenCats.includes(c)), ...spots.flatMap(s => s.categories), ...folders.map(f => f.category)])]; return l.length ? l : ['その他']; };
 const tagList = () => [...new Set(spots.flatMap(s => s.tags))].sort();
 // 旧データ（category / tag が1つだけ）を複数対応の形に変換
 const norm = s => { s.categories = s.categories || (s.category ? [s.category] : []); s.tags = s.tags || (s.tag ? [s.tag] : []); s.folderIds = s.folderIds || (s.folderId ? [s.folderId] : []); delete s.folderId; delete s.category; delete s.tag; return s; };
@@ -171,14 +172,15 @@ const regionOf = st => { const i = PREF.findIndex(g => g.split(' ').includes(st)
    クラウドDB・PC同期を足すときは、同じ形のオブジェクト（Firestore/Supabase等）に差し替える。
    spots: {id, name, lat, lng, region, categories[], tags[], folderIds[], visited, visitDate, memo, createdAt, updatedAt}
    folders: {id, name, category, createdAt, updatedAt}   ※フォルダは種類ごとに作る
+   meta: {key, value}   ※設定（削除した標準の種類など）
    photos: {spotId, blob, updatedAt}  ※写真は別ストアに分離（同期時に個別アップロードしやすい） */
 const Store = (() => {
   let dbp;
   const open = () => dbp ||= new Promise((ok, ng) => {
-    const r = indexedDB.open('stamp-rally', 2);
+    const r = indexedDB.open('stamp-rally', 3);
     r.onupgradeneeded = () => {
       const d = r.result;
-      [['spots', 'id'], ['photos', 'spotId'], ['folders', 'id']].forEach(([n, k]) => { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, {keyPath: k}); });
+      [['spots', 'id'], ['photos', 'spotId'], ['folders', 'id'], ['meta', 'key']].forEach(([n, k]) => { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, {keyPath: k}); });
     };
     r.onblocked = () => toast('他のタブでこのアプリを開いている場合は閉じて、再読み込みしてください');
     r.onsuccess = () => { r.result.onversionchange = () => r.result.close(); ok(r.result); };
@@ -199,6 +201,8 @@ const Store = (() => {
     folders: () => run(['folders'], 'readonly', f => f.getAll()),
     saveFolder: f => run(['folders'], 'readwrite', s => s.put(f)),
     removeFolder: id => run(['folders'], 'readwrite', s => s.delete(id)),
+    getMeta: async k => (await run(['meta'], 'readonly', m => m.get(k)))?.value,
+    setMeta: (k, value) => run(['meta'], 'readwrite', m => m.put({key: k, value})),
     // photo: undefined=変更なし / Blob=差し替え / null=削除
     save: (spot, photo) => run(['spots', 'photos'], 'readwrite', (s, p) => {
       if (photo === null) p.delete(spot.id);
@@ -210,7 +214,7 @@ const Store = (() => {
 })();
 
 /* ---------- 状態 ---------- */
-let spots = [], folders = [], collapsed = new Set(), photoURL = {}, F = {r: '', c: '', t: ''}, cur = null, tmp = null;
+let spots = [], folders = [], hiddenCats = [], collapsed = new Set(), photoURL = {}, F = {r: '', c: '', t: ''}, cur = null, tmp = null;
 
 /* ---------- 地図 ---------- */
 const map = L.map('map', {zoomControl: false}).setView([37.5, 137.5], 5);
@@ -366,7 +370,7 @@ function openSheet(spot, isNew) {
   $('#stt').textContent = isNew ? '新しいスポット' : 'スポットの詳細';
   $('#nm').value = spot.name; delete $('#nm').dataset.d;
   $('#rg').value = spot.region; cur.fids = [...spot.folderIds]; drawChips('#cts', cats(), spot.categories); drawChips('#tgs', tagList(), spot.tags); drawFds();
-  $('#tgs').classList.remove('del'); $('#tgm').textContent = '削除モード';
+  [['#cts', '#ctm'], ['#tgs', '#tgm']].forEach(([b, t]) => { $(b).classList.remove('del'); $(t).textContent = '削除モード'; });
   $('#vd').value = spot.visitDate || ''; $('#mm').value = spot.memo || '';
   $('#del').hidden = !!isNew;
   showCoord(); showPhoto();
@@ -388,7 +392,9 @@ const showCoord = () => $('#coord').textContent = `緯度 ${cur.spot.lat.toFixed
 
 function showPhoto() {
   const src = cur.photo === null ? null : cur.photo ? cur.url : photoURL[cur.spot.id];
-  $('#pv').innerHTML = src ? `<img src="${src}" alt="訪問写真"><span class="seal">済</span>` : '写真を選ぶと<br>スタンプを獲得できます';
+  $('#pv').hidden = !src;
+  $('#pv').innerHTML = src ? `<img src="${src}" alt="訪問写真"><span class="seal">済</span>` : '';
+  $('#ph0').hidden = !!src;
   $('#rm').hidden = !src;
   $('#sv').textContent = src ? 'スタンプを押して保存' : '保存';
 }
@@ -425,8 +431,8 @@ function drawFds() {
 addChip('#cts', cats, '新しい種類の名前（例：ロケ地、温泉）', drawFds);
 addChip('#tgs', tagList, '作品名・タグの名前（例：ゆるキャン△）');
 
-// 作品・タグの削除：全スポットから外し、候補からも消す（スポット自体は消えない）
-async function removeTag(v) {
+// 削除モード：チップをタップして、作品・タグ／種類そのものを削除する
+async function removeTag(v) {   // 全スポットから外し、候補からも消す（スポットは消えない）
   const moved = spots.filter(x => x.tags.includes(v));
   moved.forEach(x => { x.tags = x.tags.filter(t => t !== v); x.updatedAt = Date.now(); });
   await Promise.all(moved.map(x => Store.save(x)));
@@ -434,15 +440,42 @@ async function removeTag(v) {
   render();
   drawChips('#tgs', tagList(), getChips('#tgs').filter(t => t !== v));
 }
-$('#tgm').onclick = () => { const on = $('#tgs').classList.toggle('del'); $('#tgm').textContent = on ? '完了' : '削除モード'; };
-$('#tgs').addEventListener('click', async e => {
-  const l = e.target.closest('.chip');
-  if (!l || !$('#tgs').classList.contains('del')) return;
-  e.preventDefault();
-  const v = l.querySelector('input').value;
-  if (!confirm(`「${v}」を全スポットから外して、候補からも削除しますか？\nスポット自体は消えません。`)) return;
-  try { await removeTag(v); } catch { toast('削除に失敗しました'); }
-});
+async function removeCat(v) {   // 種類を外し、その種類のフォルダも消す。その種類しかないスポットは「その他」へ
+  const now = Date.now(), moved = spots.filter(x => x.categories.includes(v));
+  moved.forEach(x => {
+    x.categories = x.categories.filter(c => c !== v);
+    if (!x.categories.length) x.categories = ['その他'];
+    x.folderIds = x.folderIds.filter(id => { const f = folders.find(y => y.id === id); return f && x.categories.includes(f.category); });
+    x.updatedAt = now;
+  });
+  const gone = folders.filter(f => f.category === v);
+  await Promise.all([...moved.map(x => Store.save(x)), ...gone.map(f => Store.removeFolder(f.id))]);
+  folders = folders.filter(f => f.category !== v);
+  if (CATS[v] && !hiddenCats.includes(v)) { hiddenCats.push(v); await Store.setMeta('hiddenCats', hiddenCats); }
+  render();
+  drawChips('#cts', cats(), getChips('#cts').filter(c => c !== v));
+  drawFds();
+}
+const askTag = v => confirm(`「${v}」を全スポットから外して、候補からも削除しますか？\nスポット自体は消えません。`);
+const askCat = v => {
+  const only = spots.filter(x => x.categories.length === 1 && x.categories[0] === v).length;
+  const fs = folders.filter(f => f.category === v).length;
+  if (v === 'その他' && only) { alert(`「その他」にしかないスポットが${only}件あります。先に別の種類を付けてから削除してください。`); return false; }
+  return confirm(`種類「${v}」を削除しますか？\n` + (only ? `この種類にしかないスポット${only}件は「その他」に移ります。\n` : '') + (fs ? `この種類のフォルダ${fs}個も削除されます（スポットは消えません）。` : 'スポット自体は消えません。'));
+};
+function delMode(box, btn, ask, remove) {
+  $(btn).onclick = () => { const on = $(box).classList.toggle('del'); $(btn).textContent = on ? '完了' : '削除モード'; };
+  $(box).addEventListener('click', async e => {
+    const l = e.target.closest('.chip');
+    if (!l || !$(box).classList.contains('del')) return;
+    e.preventDefault();
+    const v = l.querySelector('input').value;
+    if (!ask(v)) return;
+    try { await remove(v); } catch { toast('削除に失敗しました'); }
+  });
+}
+delMode('#tgs', '#tgm', askTag, removeTag);
+delMode('#cts', '#ctm', askCat, removeCat);
 $('#cts').onchange = drawFds;
 $('#fds').onchange = e => { const i = e.target; cur.fids = i.checked ? [...new Set([...cur.fids, i.value])] : cur.fids.filter(x => x !== i.value); };
 $('#fds').onclick = async e => {
@@ -509,6 +542,7 @@ function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; 
   try {
     spots = (await Store.spots()).map(norm);
     folders = await Store.folders();
+    hiddenCats = (await Store.getMeta('hiddenCats')) || [];
     // 旧フォルダ（種類なし）は、入っているスポットで一番多い種類のフォルダにする
     for (const f of folders) if (!f.category) {
       const n = {};
